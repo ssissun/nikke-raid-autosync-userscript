@@ -1,2 +1,53 @@
 # nikke-raid-autosync-userscript
-NIKKE Union Raid Auto-Sync - Tampermonkey userscript (P-NRA-001 / E-NRA-001). Forks mango.hke v1.12. Intercepts blablalink.com 4 endpoints + postMessage to companion SPA/GAS tools. Third-party tool for oddoido's NIKKE union raid spreadsheet template.
+
+NIKKE 유니온 레이드 결산 시트의 신규 회차 추가를 자동화하는 Tampermonkey 유저스크립트입니다. (P-NRA-001 / E-NRA-001)
+
+mango.hke 님의 [30초 입력법 v1.12](https://greasyfork.org/en/scripts/565386) 를 fork하여, `blablalink.com` ShiftyPad에서 **레이드 결과 + 유니온 멤버 싱크로 레벨**을 동시에 추출하고 동반 도구(SPA)로 전송합니다. oddoido 님의 NIKKE 유레 결산 시트 템플릿에 대한 third-party 보조 도구이며, 시트 템플릿 자체는 변경하지 않습니다.
+
+---
+
+## 1. 무엇을 하나요
+
+- `blablalink.com`의 4개 API 응답을 인터셉트합니다: `GetUnionRaidData`(레이드 결과), `GetGuildMembers`(멤버 싱크로), `GetMyGuildInfo`, `GetSavedRoleInfo`.
+- 두 핵심 데이터가 모두 캡처되면 `window.opener.postMessage`로 동반 도구(`https://ssissun.github.io`)에 전송합니다.
+- 도구가 연결되지 않은 경우 v1.12 호환 CSV 다운로드로 fallback합니다.
+- 우상단 floating panel에 캡처 진행 상황(0/4 ~ 4/4)과 진단 메시지(로그인 필요 / 데이터 없음 / 오류)를 표시합니다.
+
+> 본인 NIKKE 계정으로 본인이 볼 수 있는 데이터만 추출합니다. 타 유니온·타 사용자 데이터에 접근하지 않습니다.
+
+## 2. Tampermonkey 설치
+
+1. 브라우저(Chrome / Edge / Firefox)에 [Tampermonkey](https://www.tampermonkey.net/) 확장을 설치합니다.
+2. Chrome/Edge는 확장 관리에서 **개발자 모드**를 켜야 유저스크립트가 정상 동작합니다.
+
+## 3. 스크립트 설치
+
+### 방법 A — Greasyfork 1-click (권장)
+
+Greasyfork 등록 후 본 섹션의 링크가 갱신됩니다. 스크립트 페이지의 **Install this script** 버튼을 누르면 Tampermonkey 설치 다이얼로그가 표시됩니다.
+
+> Greasyfork URL: _등록 후 갱신_ (E-NRA-001 F-NRA-001-01 T-02)
+
+### 방법 B — raw URL 수동 설치
+
+Tampermonkey 대시보드 → **Utilities** → **Import from URL** 에 아래 raw 파일 URL을 입력합니다:
+
+```
+https://raw.githubusercontent.com/ssissun/nikke-raid-autosync-userscript/main/nikke-raid-autosync.user.js
+```
+
+## 4. 변경 사항 (v1.12 → v2.0.0)
+
+| 영역 | v1.12 (mango.hke) | v2.0.0 (본 도구) |
+|------|-------------------|------------------|
+| 인터셉트 대상 | `GetUnionRaidData` 1개 | 4개 (+ `GetGuildMembers` / `GetMyGuildInfo` / `GetSavedRoleInfo`) |
+| 멤버 싱크로 | 미지원 | `GetGuildMembers` → 멤버별 싱크로 레벨 추출 |
+| 데이터 전달 | CSV 다운로드 | `postMessage` 도구 전송 + CSV fallback |
+| UI | 단일 추출 버튼 | floating panel (진행 표시 + 진단 메시지) |
+| 진단 | 없음 | need-login / no-data / error 도구 통보 |
+
+v1.12의 핵심 모듈(`NIKKE_DATA_LIST` 159 캐릭터 매핑, `processRaidData`, CSV 직렬화)은 회귀 위험 0을 위해 그대로 보존했습니다.
+
+---
+
+`@updateURL` / `@downloadURL`은 Greasyfork 등록(F-NRA-001-01 T-02) 후 발급 URL로 갱신됩니다. 라이선스: [MIT](./LICENSE).

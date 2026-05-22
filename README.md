@@ -50,4 +50,8 @@ v1.12의 핵심 모듈(`NIKKE_DATA_LIST` 159 캐릭터 매핑, `processRaidData`
 
 ---
 
-`@updateURL` / `@downloadURL`은 Greasyfork 등록(F-NRA-001-01 T-02) 후 발급 URL로 갱신됩니다. 라이선스: [MIT](./LICENSE).
+`@updateURL` / `@downloadURL`은 Greasyfork 등록(F-NRA-001-01 T-02) 후 발급 URL로 갱신됩니다.
+
+## 라이선스 / 출처
+
+[MIT](./LICENSE). 이 프로젝트는 mango.hke 님의 [30초 입력법 v1.12](https://greasyfork.org/scripts/565386)를 **원저자 허락 하에** fork한 derivative입니다. v1.12 기반 모듈(`NIKKE_DATA_LIST`, `processRaidData`, CSV 직렬화)의 저작권은 원저자(mango.hke)에게 있으며, 그 외 부분은 ssissun 저작입니다. 전체는 MIT로 배포됩니다.

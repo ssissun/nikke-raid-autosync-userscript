@@ -1,6 +1,13 @@
 MIT License
 
 Copyright (c) 2026 ssissun
+Portions Copyright (c) 2026 mango.hke
+
+This software is a derivative of "니케 유레 결산 시트 전용 csv 다운로더" v1.12 by
+mango.hke (https://greasyfork.org/scripts/565386), used with the original author's
+permission. The v1.12-derived modules (NIKKE_DATA_LIST, processRaidData, and the CSV
+serialization) retain mango.hke's copyright; all other portions are copyright ssissun.
+The combined work is distributed under the MIT License below.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

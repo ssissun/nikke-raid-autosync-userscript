@@ -10,8 +10,8 @@
 // @license     MIT
 // @homepageURL https://github.com/ssissun/nikke-raid-autosync-userscript
 // @supportURL  https://arca.live/b/nikketgv/161405505
-// @updateURL   https://greasyfork.org/scripts/PLACEHOLDER/code/nikke-raid-autosync.user.js
-// @downloadURL https://greasyfork.org/scripts/PLACEHOLDER/code/nikke-raid-autosync.user.js
+// @updateURL   https://update.greasyfork.org/scripts/579278/%EB%8B%88%EC%BC%80%20%EC%9C%A0%EB%A0%88%20%EC%9E%90%EB%8F%99%20%EB%8F%99%EA%B8%B0%ED%99%94%20%28%EC%8B%B1%ED%81%AC%EB%A1%9C%20%EB%A0%88%EB%B2%A8%20%2B%20%EB%A0%88%EC%9D%B4%EB%93%9C%20%EA%B2%B0%EA%B3%BC%29.meta.js
+// @downloadURL https://update.greasyfork.org/scripts/579278/%EB%8B%88%EC%BC%80%20%EC%9C%A0%EB%A0%88%20%EC%9E%90%EB%8F%99%20%EB%8F%99%EA%B8%B0%ED%99%94%20%28%EC%8B%B1%ED%81%AC%EB%A1%9C%20%EB%A0%88%EB%B2%A8%20%2B%20%EB%A0%88%EC%9D%B4%EB%93%9C%20%EA%B2%B0%EA%B3%BC%29.user.js
 // ==/UserScript==
 
 (function () {

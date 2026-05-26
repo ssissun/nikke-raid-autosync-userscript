@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name        니케 유레 자동 동기화 (싱크로 레벨 + 레이드 결과)
 // @namespace   nikke-raid-autosync
-// @version     2.0.0
+// @version     2.0.1
 // @description Blablalink ShiftyPad에서 유니온 멤버 싱크로 레벨 + 레이드 결과를 추출하여 nikke-raid-autosync 도구(SPA)로 전송. mango.hke 30초 입력법 v1.12 fork.
 // @author      ssissun (mango.hke v1.12 fork)
 // @match       *://*.blablalink.com/*
 // @run-at      document-start
-// @grant       none
+// @grant       unsafeWindow
+// @inject-into page
 // @license     MIT
 // @homepageURL https://github.com/ssissun/nikke-raid-autosync-userscript
 // @supportURL  https://arca.live/b/nikketgv/161405505
@@ -237,6 +238,11 @@
   // 도구 SPA origin (strict, "*" 금지 — PR-04 XSS 통로 차단)
   const TOOL_ORIGIN = "https://ssissun.github.io";
 
+  // Tampermonkey V3 (Manifest V3 + 사용자 스크립트 허용 모드)에서는 `window`가 sandbox일 수 있어
+  // window.opener가 main world opener와 분리됨. unsafeWindow는 항상 page main world를 가리킴.
+  // `@grant unsafeWindow` + `@inject-into page` 조합으로 명시적으로 main world 접근.
+  const PAGE_WINDOW = (typeof unsafeWindow !== "undefined") ? unsafeWindow : window;
+
   // 4 endpoint URL 키워드 (F-02 인터셉트 대상)
   const ENDPOINT_KEYWORDS = ["GetUnionRaidData", "GetGuildMembers", "GetMyGuildInfo", "GetSavedRoleInfo"];
 
@@ -309,8 +315,8 @@
     if (sentDiagnostics.has(payload.type)) return false;
     sentDiagnostics.add(payload.type);
     try {
-      if (window.opener && !window.opener.closed) {
-        window.opener.postMessage(payload, TOOL_ORIGIN);
+      if (PAGE_WINDOW.opener && !PAGE_WINDOW.opener.closed) {
+        PAGE_WINDOW.opener.postMessage(payload, TOOL_ORIGIN);
       }
     } catch (e) { /* swallow — 페이지 흐름 비파괴 */ }
     updatePanel({ diagnostic: payload.type, statusText: diagnosticText(payload.type) });
@@ -369,9 +375,13 @@
     if (!captures.raid || !captures.members) return;
     clearTimeout(captureTimeout);
     const payload = buildPayload("nikke-raid-data");
+    // 진단 로그 — main world opener 접근 검증 (V3 sandbox 우회 확인용)
+    console.log("[NRA] PAGE_WINDOW.opener:", typeof PAGE_WINDOW.opener,
+                "closed:", PAGE_WINDOW.opener?.closed,
+                "TOOL_ORIGIN:", TOOL_ORIGIN);
     try {
-      if (window.opener && !window.opener.closed) {
-        window.opener.postMessage(payload, TOOL_ORIGIN);
+      if (PAGE_WINDOW.opener && !PAGE_WINDOW.opener.closed) {
+        PAGE_WINDOW.opener.postMessage(payload, TOOL_ORIGIN);
         const size = JSON.stringify(payload).length;
         console.log("[NRA] postMessage sent, size:", size);
         updatePanel({ statusText: "도구로 전송 완료", diagnostic: "success" });

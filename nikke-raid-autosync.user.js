@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        니케 유레 자동 동기화 (싱크로 레벨 + 레이드 결과)
 // @namespace   nikke-raid-autosync
-// @version     2.2.0
+// @version     2.3.0
 // @description Blablalink ShiftyPad에서 유니온 멤버 싱크로 레벨 + 레이드 결과를 추출하여 nikke-raid-autosync 도구(SPA)로 전송. mango.hke 30초 입력법 v1.12 fork.
 // @author      ssissun (mango.hke v1.12 fork)
 // @match       *://*.blablalink.com/*
@@ -251,7 +251,9 @@
   // 2순위: cdnFallbackDict (페이지 로드 시 자동 갱신, localStorage 캐싱).
   // 게임 신규 니케 출시 시 NIKKE_DATA_LIST 수동 갱신 없이도 매칭됨.
   // =========================================================================
-  const CDN_FALLBACK_STORAGE_KEY = "nra-cdn-fallback-dict-v1";
+  // v2: SSR 필터 도입. v1 캐시(R/SR 등 모든 등급 포함)는 마이그레이션 차원에서 무효화.
+  const CDN_FALLBACK_STORAGE_KEY = "nra-cdn-fallback-dict-v2";
+  try { localStorage.removeItem("nra-cdn-fallback-dict-v1"); } catch (e) { /* ignore */ }
 
   // { key: name } where key = Math.floor(tid / 100). 형식: nikkeDictionary 와 동일.
   const cdnFallbackDict = (() => {
@@ -285,12 +287,14 @@
 
   // 마스터 JSON 흡수 → cdnFallbackDict 갱신 + localStorage 저장.
   // 반환: NIKKE_DATA_LIST 에 없는 신규 니케 목록 ({id, key, name}[]).
+  // SSR 만 포함 — NIKKE_DATA_LIST 가 수집형 5성(SSR) 전용이므로 R/SR 일반 NPC 제외.
   function ingestNikkeMaster(json) {
     const newNikkes = [];
     let updated = 0;
     for (const item of json) {
       if (!item || typeof item.id !== "number") continue;
       if (!item.name_localkey || typeof item.name_localkey.name !== "string") continue;
+      if (item.original_rare !== "SSR") continue; // SSR 필터
       const key = Math.floor(item.id / 100);
       const name = item.name_localkey.name;
       if (cdnFallbackDict[key] !== name) {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        니케 유레 자동 동기화 (싱크로 레벨 + 레이드 결과)
 // @namespace   nikke-raid-autosync
-// @version     2.0.1
+// @version     2.1.0
 // @description Blablalink ShiftyPad에서 유니온 멤버 싱크로 레벨 + 레이드 결과를 추출하여 nikke-raid-autosync 도구(SPA)로 전송. mango.hke 30초 입력법 v1.12 fork.
 // @author      ssissun (mango.hke v1.12 fork)
 // @match       *://*.blablalink.com/*
@@ -17,6 +17,20 @@
 
 (function () {
   'use strict';
+
+  // =========================================================================
+  // SPA trigger gate — `?nra=1` query param 없으면 즉시 종료
+  // 사용자가 blablalink 직접 접속 시 동작하지 않도록 차단 (의도하지 않은 floater/capture 방지).
+  // SPA(https://ssissun.github.io/nikke-raid-autosync-spa/)의 [신규 회차 데이터 가져오기]
+  // 버튼이 ?nra=1 을 붙여 새 탭 open 하므로, 그 경로로만 활성화된다.
+  // =========================================================================
+  try {
+    if (!new URLSearchParams(location.search).has("nra")) {
+      return; // 일반 blablalink 사용 시 차단
+    }
+  } catch (e) {
+    return; // location.search 접근 실패 시 안전 차단
+  }
 
   // =========================================================================
   // [v1.12 byte-identical core] mango.hke Greasyfork 565386 — 회귀 위험 0
@@ -265,9 +279,10 @@
 
   const captures = { raid: null, members: null, guildId: null, areaId: null };
 
+  // 도구 송신 조건과 분모 일치 — raid + members 만 필수 (guildId/areaId 는 옵셔널 메타).
+  // floater 표시: "캡처 N/2".
   function capturedCount() {
-    return (captures.raid ? 1 : 0) + (captures.members ? 1 : 0) +
-      (captures.guildId ? 1 : 0) + (captures.areaId ? 1 : 0);
+    return (captures.raid ? 1 : 0) + (captures.members ? 1 : 0);
   }
 
   // GetGuildMembers items[] → Member[] (code != 0 또는 items 부재 시 null)
@@ -448,7 +463,7 @@
       '  <button id="nra-close" aria-label="닫기" style="background:none;border:0;color:' + PALETTE.meta + ';font-size:16px;cursor:pointer;line-height:1;padding:0 2px">×</button>' +
       '</div>' +
       '<div id="nra-status" style="margin-bottom:6px">데이터 캡처 중...</div>' +
-      '<div id="nra-progress" style="font-size:11px;color:' + PALETTE.meta + '">캡처 0/4</div>' +
+      '<div id="nra-progress" style="font-size:11px;color:' + PALETTE.meta + '">캡처 0/2</div>' +
       '<div id="nra-action" style="margin-top:8px;display:none"></div>';
     document.body.appendChild(panel);
 
@@ -477,7 +492,7 @@
     }
     if (state.captured != null) {
       const el = panel.querySelector("#nra-progress");
-      if (el) el.textContent = "캡처 " + state.captured + "/4";
+      if (el) el.textContent = "캡처 " + state.captured + "/2";
     }
     if (state.diagnostic != null) {
       const style = DIAGNOSTIC_STYLE[state.diagnostic];

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        니케 유레 자동 동기화 (싱크로 레벨 + 레이드 결과)
 // @namespace   nikke-raid-autosync
-// @version     2.3.1
+// @version     2.3.2
 // @description Blablalink ShiftyPad에서 유니온 멤버 싱크로 레벨 + 레이드 결과를 추출하여 nikke-raid-autosync 도구(SPA)로 전송. mango.hke 30초 입력법 v1.12 fork.
 // @author      ssissun (mango.hke v1.12 fork)
 // @match       *://*.blablalink.com/*
@@ -198,7 +198,11 @@
   {"id":140301,"name_localkey":{"name":"퀀시"}},
   {"id":258001,"name_localkey":{"name":"팬텀"}},
   {"id":217001,"name_localkey":{"name":"프바"}},
-  {"id":235201,"name_localkey":{"name":"헬름"}}
+  {"id":235201,"name_localkey":{"name":"헬름"}},
+  {"id":244101,"name_localkey":{"name":"아비스타"}},
+  {"id":580001,"name_localkey":{"name":"마키마"}},
+  {"id":580101,"name_localkey":{"name":"파워"}},
+  {"id":582101,"name_localkey":{"name":"에밀리아"}}
 ]`;
 
   // JSON 객체 변환

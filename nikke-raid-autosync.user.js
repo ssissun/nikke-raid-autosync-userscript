@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        니케 유레 자동 동기화 (싱크로 레벨 + 레이드 결과)
 // @namespace   nikke-raid-autosync
-// @version     2.3.0
+// @version     2.3.1
 // @description Blablalink ShiftyPad에서 유니온 멤버 싱크로 레벨 + 레이드 결과를 추출하여 nikke-raid-autosync 도구(SPA)로 전송. mango.hke 30초 입력법 v1.12 fork.
 // @author      ssissun (mango.hke v1.12 fork)
 // @match       *://*.blablalink.com/*
@@ -716,8 +716,11 @@
     } catch (e) { /* swallow — 페이지 흐름 비파괴 */ }
   }
 
-  const originalFetch = window.fetch;
-  window.fetch = async (...args) => {
+  // fetch wrapper — PAGE_WINDOW(=unsafeWindow) 의 fetch 를 직접 후킹.
+  // anti-debugger 또는 page script 가 우리 후에 fetch 를 reset 하려고 시도해도
+  // Object.defineProperty getter/setter 로 silently ignore 하여 wrapper 보존.
+  const originalFetch = PAGE_WINDOW.fetch.bind(PAGE_WINDOW);
+  const ourFetch = async (...args) => {
     const response = await originalFetch(...args);
     try {
       const url = args[0];
@@ -736,6 +739,17 @@
     } catch (e) { /* ignore parsing errors */ }
     return response;
   };
+  try {
+    Object.defineProperty(PAGE_WINDOW, "fetch", {
+      configurable: true,
+      enumerable: true,
+      get() { return ourFetch; },
+      set() { /* 페이지의 fetch reset 시도 silently ignore — wrapper 보존 */ },
+    });
+  } catch (e) {
+    // defineProperty 실패 환경 — 일반 할당 fallback (페이지 reset 에 취약하지만 동작은 함)
+    PAGE_WINDOW.fetch = ourFetch;
+  }
 
   const { open, send } = XMLHttpRequest.prototype;
   XMLHttpRequest.prototype.open = function (...args) {

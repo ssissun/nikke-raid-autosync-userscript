@@ -841,5 +841,5 @@
   // 초기화
   ensureFloatingPanel();
   checkLogin();
-  console.log("[NRA] v2.0.0 loaded");
+  console.log("[NRA] v2.3.2 loaded");
 })();

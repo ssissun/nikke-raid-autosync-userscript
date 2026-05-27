@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        니케 유레 자동 동기화 (싱크로 레벨 + 레이드 결과)
 // @namespace   nikke-raid-autosync
-// @version     2.1.0
+// @version     2.2.0
 // @description Blablalink ShiftyPad에서 유니온 멤버 싱크로 레벨 + 레이드 결과를 추출하여 nikke-raid-autosync 도구(SPA)로 전송. mango.hke 30초 입력법 v1.12 fork.
 // @author      ssissun (mango.hke v1.12 fork)
 // @match       *://*.blablalink.com/*
@@ -246,6 +246,119 @@
   }
 
   // =========================================================================
+  // CDN 마스터 fallback dictionary — sg-tools-cdn 캐릭터 마스터 JSON 자동 학습.
+  // 1순위: NIKKE_DATA_LIST (hardcoded, v1.12 byte-identical core).
+  // 2순위: cdnFallbackDict (페이지 로드 시 자동 갱신, localStorage 캐싱).
+  // 게임 신규 니케 출시 시 NIKKE_DATA_LIST 수동 갱신 없이도 매칭됨.
+  // =========================================================================
+  const CDN_FALLBACK_STORAGE_KEY = "nra-cdn-fallback-dict-v1";
+
+  // { key: name } where key = Math.floor(tid / 100). 형식: nikkeDictionary 와 동일.
+  const cdnFallbackDict = (() => {
+    try {
+      const raw = localStorage.getItem(CDN_FALLBACK_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) { /* ignore */ }
+    return {};
+  })();
+
+  // sg-tools-cdn URL 의 .json 응답인지 판정.
+  function matchCdnMasterUrl(url) {
+    if (!url) return false;
+    const s = url.toString();
+    return s.includes("sg-tools-cdn.blablalink.com") && s.endsWith(".json");
+  }
+
+  // 응답이 NIKKE 캐릭터 마스터 JSON 인지 판정.
+  // 패턴: 배열 + 첫 entry 가 {id: 6자리 number, name_localkey: {name: 한글 string}}.
+  function isNikkeMasterJson(json) {
+    if (!Array.isArray(json) || json.length === 0) return false;
+    const first = json[0];
+    if (!first || typeof first.id !== "number") return false;
+    if (String(first.id).length !== 6) return false;
+    if (!first.name_localkey || typeof first.name_localkey.name !== "string") return false;
+    return first.name_localkey.name.length > 0;
+  }
+
+  // 마스터 JSON 흡수 → cdnFallbackDict 갱신 + localStorage 저장.
+  // 반환: NIKKE_DATA_LIST 에 없는 신규 니케 목록 ({id, key, name}[]).
+  function ingestNikkeMaster(json) {
+    const newNikkes = [];
+    let updated = 0;
+    for (const item of json) {
+      if (!item || typeof item.id !== "number") continue;
+      if (!item.name_localkey || typeof item.name_localkey.name !== "string") continue;
+      const key = Math.floor(item.id / 100);
+      const name = item.name_localkey.name;
+      if (cdnFallbackDict[key] !== name) {
+        cdnFallbackDict[key] = name;
+        updated++;
+      }
+      if (!nikkeDictionary[key]) {
+        newNikkes.push({ id: item.id, key, name });
+      }
+    }
+    if (updated > 0) {
+      try { localStorage.setItem(CDN_FALLBACK_STORAGE_KEY, JSON.stringify(cdnFallbackDict)); } catch (e) { /* ignore */ }
+    }
+    return newNikkes;
+  }
+
+  // 신규 니케 누적 카운트 (페이지 세션 동안). 중복 표시 방지.
+  const seenNewNikkeKeys = new Set();
+  function reportNewNikkes(newNikkes) {
+    let addedThisCall = 0;
+    for (const n of newNikkes) {
+      if (seenNewNikkeKeys.has(n.key)) continue;
+      seenNewNikkeKeys.add(n.key);
+      console.log(`[NRA] 신규 니케 (NIKKE_DATA_LIST 미등록): id=${n.id}, name="${n.name}"`);
+      addedThisCall++;
+    }
+    if (addedThisCall > 0 && seenNewNikkeKeys.size > 0) {
+      updatePanel({ newNikkeCount: seenNewNikkeKeys.size });
+    }
+  }
+
+  // processRaidData byte-identical core 결과 후처리.
+  // unit name 컬럼(4·6·8·10·12)의 `Unknown(XXXXXX)` 패턴을 cdnFallbackDict 로 대체.
+  // SOT(API_SPEC) 헤더 순서: "회차, 닉네임, 보스명, 단계, 1번 자리, 1번 돌파, 2번 자리, 2번 돌파, ..."
+  function processRaidDataWithFallback(data, raidNum) {
+    const result = processRaidData(data, raidNum); // v1.12 byte-identical 호출
+    const unitNameColIdxs = [4, 6, 8, 10, 12];
+    for (let i = 1; i < result.length; i++) {
+      const row = result[i];
+      if (!row) continue;
+      for (const colIdx of unitNameColIdxs) {
+        const cellValue = row[colIdx];
+        if (typeof cellValue !== "string") continue;
+        const m = cellValue.match(/^Unknown\((\d+)\)$/);
+        if (!m) continue;
+        const id = parseInt(m[1], 10);
+        const key = Math.floor(id / 100);
+        if (cdnFallbackDict[key]) {
+          row[colIdx] = cdnFallbackDict[key];
+        }
+      }
+    }
+    return result;
+  }
+
+  // 페이지 로드 직후 localStorage 캐시 의 fallback dict 와 NIKKE_DATA_LIST 비교 보고.
+  // 캐시에 있던 신규 니케를 즉시 콘솔/플로터에 표시 (panel ready 후 표시됨).
+  function reportFromCache() {
+    const fromCache = [];
+    for (const [keyStr, name] of Object.entries(cdnFallbackDict)) {
+      const key = parseInt(keyStr, 10);
+      if (Number.isNaN(key) || nikkeDictionary[key]) continue;
+      fromCache.push({ id: key * 100 + 1, key, name });
+    }
+    if (fromCache.length > 0) reportNewNikkes(fromCache);
+  }
+
+  // =========================================================================
   // [F-NRA-001-03] 상수 + helper
   // =========================================================================
 
@@ -373,7 +486,7 @@
         // SOT(API_SPEC §2) raid = ProcessedRaidRow[] (headerless). processRaidData는
         // [headers, ...rows]를 반환하므로 header(index 0)를 제거하고 데이터 row만 전송한다.
         // (CSV fallback은 exportToCSV가 별도로 header를 재생성한다.)
-        raid: captures.raid ? processRaidData(captures.raid, raidNum).slice(1) : null,
+        raid: captures.raid ? processRaidDataWithFallback(captures.raid, raidNum).slice(1) : null,
         members: processGuildMembers(captures.members),
         meta: { guildId: captures.guildId, areaId: captures.areaId }
       }, extras);
@@ -464,6 +577,7 @@
       '</div>' +
       '<div id="nra-status" style="margin-bottom:6px">데이터 캡처 중...</div>' +
       '<div id="nra-progress" style="font-size:11px;color:' + PALETTE.meta + '">캡처 0/2</div>' +
+      '<div id="nra-new-nikke" style="font-size:11px;color:' + PALETTE.meta + ';margin-top:2px;display:none"></div>' +
       '<div id="nra-action" style="margin-top:8px;display:none"></div>';
     document.body.appendChild(panel);
 
@@ -472,6 +586,8 @@
     document.addEventListener("keydown", onEscClose);
 
     panelReady = true;
+    // Panel 첫 생성 직후 localStorage 캐시 의 신규 니케 보고 (macrotask 분리로 재귀 회피)
+    setTimeout(reportFromCache, 0);
     return panel;
   }
 
@@ -493,6 +609,17 @@
     if (state.captured != null) {
       const el = panel.querySelector("#nra-progress");
       if (el) el.textContent = "캡처 " + state.captured + "/2";
+    }
+    if (state.newNikkeCount != null) {
+      const el = panel.querySelector("#nra-new-nikke");
+      if (el) {
+        if (state.newNikkeCount > 0) {
+          el.textContent = "신규 니케 " + state.newNikkeCount + "명 (콘솔 확인)";
+          el.style.display = "block";
+        } else {
+          el.style.display = "none";
+        }
+      }
     }
     if (state.diagnostic != null) {
       const style = DIAGNOSTIC_STYLE[state.diagnostic];
@@ -519,7 +646,7 @@
       return;
     }
     const raidNum = payload && payload.raidNum;
-    const rowsArray = processRaidData(captures.raid, raidNum); // [headers, ...rows]
+    const rowsArray = processRaidDataWithFallback(captures.raid, raidNum); // [headers, ...rows]
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     const fileName = raidNum ? `니케_유레_S${raidNum}_${dateStr}.csv` : `니케_유레_${dateStr}.csv`;
 
@@ -589,10 +716,18 @@
   window.fetch = async (...args) => {
     const response = await originalFetch(...args);
     try {
-      const endpoint = matchEndpoint(args[0]);
+      const url = args[0];
+      const endpoint = matchEndpoint(url);
       if (endpoint) {
         const json = await response.clone().json();
         handleCapture(endpoint, json);
+      } else if (matchCdnMasterUrl(url)) {
+        // sg-tools-cdn JSON — 캐릭터 마스터 패턴이면 fallback dict 갱신
+        const json = await response.clone().json();
+        if (isNikkeMasterJson(json)) {
+          const newNikkes = ingestNikkeMaster(json);
+          reportNewNikkes(newNikkes);
+        }
       }
     } catch (e) { /* ignore parsing errors */ }
     return response;
@@ -610,6 +745,12 @@
         if (endpoint) {
           const json = JSON.parse(this.responseText);
           handleCapture(endpoint, json);
+        } else if (matchCdnMasterUrl(this._nraUrl)) {
+          const json = JSON.parse(this.responseText);
+          if (isNikkeMasterJson(json)) {
+            const newNikkes = ingestNikkeMaster(json);
+            reportNewNikkes(newNikkes);
+          }
         }
       } catch (e) { /* ignore parsing errors */ }
     });

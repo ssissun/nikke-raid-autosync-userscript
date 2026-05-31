@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        니케 유레 자동 동기화 (싱크로 레벨 + 레이드 결과)
 // @namespace   nikke-raid-autosync
-// @version     2.3.2
+// @version     2.4.0
 // @description Blablalink ShiftyPad에서 유니온 멤버 싱크로 레벨 + 레이드 결과를 추출하여 nikke-raid-autosync 도구(SPA)로 전송. mango.hke 30초 입력법 v1.12 fork.
 // @author      ssissun (mango.hke v1.12 fork)
 // @match       *://*.blablalink.com/*
@@ -24,10 +24,14 @@
   // SPA(https://ssissun.github.io/nikke-raid-autosync-spa/)의 [신규 회차 데이터 가져오기]
   // 버튼이 ?nra=1 을 붙여 새 탭 open 하므로, 그 경로로만 활성화된다.
   // =========================================================================
+  let NRA_FROM_ROUND = null; // SPA 가 전달한 백필 시작 회차 (?from=38). 없으면 현재 회차만.
   try {
-    if (!new URLSearchParams(location.search).has("nra")) {
+    const sp = new URLSearchParams(location.search);
+    if (!sp.has("nra")) {
       return; // 일반 blablalink 사용 시 차단
     }
+    const f = parseInt(sp.get("from"), 10);
+    if (!Number.isNaN(f) && f > 0) NRA_FROM_ROUND = f;
   } catch (e) {
     return; // location.search 접근 실패 시 안전 차단
   }
@@ -398,12 +402,121 @@
   // [F-NRA-001-02] captures + 변환 + schema validator
   // =========================================================================
 
-  const captures = { raid: null, members: null, guildId: null, areaId: null };
+  const captures = { raid: null, members: null, guildId: null, areaId: null, raidReq: null };
 
   // 도구 송신 조건과 분모 일치 — raid + members 만 필수 (guildId/areaId 는 옵셔널 메타).
   // floater 표시: "캡처 N/2".
   function capturedCount() {
     return (captures.raid ? 1 : 0) + (captures.members ? 1 : 0);
+  }
+
+  // =========================================================================
+  // [v2.4.0] season_id ↔ 회차 변환 + 다회차 백필 + 레이드 당시 싱크로 레벨
+  // season_id 형식: 1000040 = 40차 (base 1000000). Phase 0 실측 확인.
+  // =========================================================================
+  const SEASON_BASE = 1000000;
+  const MAX_BACKFILL = 30; // 안전 cap — 무한 fetch 방지
+
+  function seasonToRound(seasonId) {
+    const n = Number(seasonId);
+    if (!Number.isFinite(n)) return null;
+    const r = n - SEASON_BASE;
+    return r > 0 ? r : null;
+  }
+  function roundToSeason(round) {
+    return String(SEASON_BASE + round);
+  }
+
+  // 레이드 당시 싱크로 레벨 (A2) — squad 니케 lv = 그 회차 싱크로 레벨(사용자 확정).
+  // participate_data 를 nickname 으로 group → 멤버별 모든 타수의 max(squad[].lv).
+  // nickname → member_id (현재 members) 매핑하여 { member_id: maxLv } 반환.
+  function computeRoundSyncroLevels(raidJson, members) {
+    const result = {};
+    const pd = raidJson && raidJson.data && Array.isArray(raidJson.data.participate_data)
+      ? raidJson.data.participate_data : [];
+    // nickname → max squad lv
+    const byNick = {};
+    for (const rec of pd) {
+      const nick = rec && rec.nickname;
+      if (!nick) continue;
+      const squad = Array.isArray(rec.squad) ? rec.squad : [];
+      let mx = byNick[nick] || 0;
+      for (const u of squad) {
+        const lv = u && typeof u.lv === "number" ? u.lv : 0;
+        if (lv > mx) mx = lv;
+      }
+      byNick[nick] = mx;
+    }
+    // nickname → member_id (현재 멤버 기준). 미참여/탈퇴 멤버는 자연 제외.
+    const nickToId = {};
+    for (const m of (members || [])) {
+      if (m && m.nickname) nickToId[m.nickname] = m.member_id;
+    }
+    for (const nick of Object.keys(byNick)) {
+      const id = nickToId[nick];
+      if (id && byNick[nick] > 0) result[id] = byNick[nick];
+    }
+    return result;
+  }
+
+  // season_id 만 바꿔 과거 회차 데이터 직접 fetch (Phase 0 검증 — 헤더 하드코딩 + cookie).
+  // 반환: raidJson (pdCount>0) | null (빈 회차 / 실패).
+  async function fetchRoundRaid(round, reqBase) {
+    const url = "https://api.blablalink.com/api/game/proxy/Game/GetUnionRaidDataOfGuildSeason";
+    const headers = {
+      "content-type": "application/json",
+      "x-channel-type": "2",
+      "x-language": "ko",
+      "x-common-params": JSON.stringify({
+        game_id: "16", area_id: "global", source: "pc_web", intl_game_id: "29080",
+        language: "ko", env: "prod", data_statistics_scene: "outer",
+        data_statistics_page_id: location.href,
+        data_statistics_client_type: "pc_web", data_statistics_lang: "ko"
+      })
+    };
+    try {
+      const res = await originalFetch(url, {
+        method: "POST", headers, credentials: "include",
+        body: JSON.stringify({
+          area_id: reqBase.area_id, guild_id: reqBase.guild_id, season_id: roundToSeason(round)
+        })
+      });
+      const j = await res.json();
+      const pd = j && j.data && j.data.participate_data;
+      return (j && j.code === 0 && Array.isArray(pd) && pd.length > 0) ? j : null;
+    } catch (e) {
+      console.log("[NRA] fetchRoundRaid 실패 round=" + round + ":", e && e.message);
+      return null;
+    }
+  }
+
+  // 다회차 백필 — current 부터 내림차순으로 fetch, 첫 빈 응답 또는 from 미만에서 중단.
+  // 반환: rounds[] (오름차순) — { raidNum, raid: ProcessedRaidRow[], memberSyncroLevels }.
+  async function backfillRounds(currentRound, fromRound, reqBase, members) {
+    const lowerBound = Math.max(
+      fromRound || currentRound,
+      currentRound - MAX_BACKFILL + 1,
+      1
+    );
+    const collected = [];
+    for (let r = currentRound; r >= lowerBound; r--) {
+      // 현재 회차는 passive capture 재사용 (1 fetch 절감)
+      const raidJson = (r === currentRound && captures.raid) ? captures.raid : await fetchRoundRaid(r, reqBase);
+      if (!raidJson) {
+        if (r === currentRound) {
+          // 현재 회차 데이터 없음 — 비정상, 중단
+          break;
+        }
+        // 과거 회차 빈 응답 → 더 과거도 없다고 보고 중단
+        break;
+      }
+      const rows = processRaidDataWithFallback(raidJson, String(r)).slice(1); // header 제거
+      const memberSyncroLevels = computeRoundSyncroLevels(raidJson, members);
+      collected.push({ raidNum: String(r), raid: rows, memberSyncroLevels });
+      updatePanel({ statusText: "회차 데이터 수집 중... (" + collected.length + "개)" });
+    }
+    collected.reverse(); // 오름차순 (38→39→40)
+    return collected;
   }
 
   // GetGuildMembers items[] → Member[] (code != 0 또는 items 부재 시 null)
@@ -506,20 +619,26 @@
     return Object.assign(base, extras);
   }
 
-  // raid + members 모두 캡처되면 도구로 송신, 실패 시 CSV fallback
-  function checkAndSend() {
-    if (!captures.raid || !captures.members) return;
-    clearTimeout(captureTimeout);
-    const payload = buildPayload("nikke-raid-data");
-    // 진단 로그 — main world opener 접근 검증 (V3 sandbox 우회 확인용)
+  // 다회차 payload 구성 (신규 type). rounds 오름차순.
+  function buildMultiPayload(rounds, members) {
+    return {
+      type: "nikke-raid-multi",
+      capturedAt: kstISO(),
+      availableRaidNums: rounds.map(r => r.raidNum),
+      rounds: rounds,
+      members: members,
+      meta: { guildId: captures.guildId, areaId: captures.areaId }
+    };
+  }
+
+  // payload 송신 (opener postMessage → 실패 시 CSV fallback).
+  function dispatchPayload(payload, csvFallbackPayload) {
     console.log("[NRA] PAGE_WINDOW.opener:", typeof PAGE_WINDOW.opener,
-                "closed:", PAGE_WINDOW.opener?.closed,
-                "TOOL_ORIGIN:", TOOL_ORIGIN);
+                "closed:", PAGE_WINDOW.opener?.closed, "TOOL_ORIGIN:", TOOL_ORIGIN);
     try {
       if (PAGE_WINDOW.opener && !PAGE_WINDOW.opener.closed) {
         PAGE_WINDOW.opener.postMessage(payload, TOOL_ORIGIN);
-        const size = JSON.stringify(payload).length;
-        console.log("[NRA] postMessage sent, size:", size);
+        console.log("[NRA] postMessage sent, size:", JSON.stringify(payload).length);
         updatePanel({ statusText: "도구로 전송 완료", diagnostic: "success" });
         return;
       }
@@ -527,7 +646,48 @@
       console.log("[NRA] postMessage failed, fallback CSV:", e && e.message);
     }
     console.log("[NRA] no opener, fallback CSV");
-    fallbackCSV(payload);
+    fallbackCSV(csvFallbackPayload || payload);
+  }
+
+  // raid + members 모두 캡처되면 다회차 백필 후 도구로 송신.
+  let nraSent = false;
+  function checkAndSend() {
+    if (nraSent) return;
+    if (!captures.raid || !captures.members) return;
+    nraSent = true;
+    clearTimeout(captureTimeout);
+
+    const members = processGuildMembers(captures.members);
+    const currentRound = captures.raidReq ? seasonToRound(captures.raidReq.season_id) : null;
+
+    // season_id 확보 실패 → 레거시 single fallback (회차 추측은 SPA 측 guessNextRaidNum)
+    if (currentRound === null || !captures.raidReq) {
+      console.log("[NRA] season_id 미확보 — 레거시 single payload fallback");
+      dispatchPayload(buildPayload("nikke-raid-data"));
+      return;
+    }
+
+    // 다회차 백필 (현재~from 내림차순, 첫 빈 응답에서 중단)
+    updatePanel({ statusText: "회차 데이터 수집 중..." });
+    backfillRounds(currentRound, NRA_FROM_ROUND, captures.raidReq, members)
+      .then(rounds => {
+        if (!rounds || rounds.length === 0) {
+          // 백필 0건 — 현재 회차 단일로라도 송신 (passive capture)
+          const single = {
+            raidNum: String(currentRound),
+            raid: processRaidDataWithFallback(captures.raid, String(currentRound)).slice(1),
+            memberSyncroLevels: computeRoundSyncroLevels(captures.raid, members)
+          };
+          rounds = [single];
+        }
+        console.log("[NRA] 다회차 수집 완료:", rounds.map(r => r.raidNum).join(", "));
+        updatePanel({ statusText: "회차 " + rounds.length + "개 전송 (" + rounds.map(r => r.raidNum + "차").join("·") + ")" });
+        dispatchPayload(buildMultiPayload(rounds, members), buildPayload("nikke-raid-data"));
+      })
+      .catch(e => {
+        console.log("[NRA] 다회차 백필 오류, single fallback:", e && e.message);
+        dispatchPayload(buildPayload("nikke-raid-data"));
+      });
   }
 
   // =========================================================================
@@ -700,11 +860,23 @@
     return null;
   }
 
+  // 요청 body(문자열)에서 {area_id, guild_id, season_id} 파싱 → captures.raidReq.
+  // 다회차 백필 시 area_id/guild_id 재사용 + season_id 로 현재 회차 결정.
+  function captureRaidReqBody(rawBody) {
+    try {
+      const b = typeof rawBody === "string" ? JSON.parse(rawBody) : rawBody;
+      if (b && (b.season_id != null) && (b.guild_id != null)) {
+        captures.raidReq = { area_id: b.area_id, guild_id: b.guild_id, season_id: String(b.season_id) };
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   // 캡처된 응답 1건 처리 (fetch / XHR 공용) — DRY: inspectResponse 단일 wiring
-  function handleCapture(endpoint, json) {
+  function handleCapture(endpoint, json, reqBody) {
     try {
       if (endpoint === "GetUnionRaidData") {
         captures.raid = json;
+        if (reqBody != null) captureRaidReqBody(reqBody);
       } else if (endpoint === "GetGuildMembers") {
         captures.members = json;
       } else if (endpoint === "GetMyGuildInfo") {
@@ -731,7 +903,8 @@
       const endpoint = matchEndpoint(url);
       if (endpoint) {
         const json = await response.clone().json();
-        handleCapture(endpoint, json);
+        const reqBody = args[1] && args[1].body != null ? args[1].body : null;
+        handleCapture(endpoint, json, reqBody);
       } else if (matchCdnMasterUrl(url)) {
         // sg-tools-cdn JSON — 캐릭터 마스터 패턴이면 fallback dict 갱신
         const json = await response.clone().json();
@@ -761,12 +934,13 @@
     return open.apply(this, args);
   };
   XMLHttpRequest.prototype.send = function (...args) {
+    const reqBody = args && args.length > 0 ? args[0] : null;
     this.addEventListener("load", function () {
       try {
         const endpoint = matchEndpoint(this._nraUrl);
         if (endpoint) {
           const json = JSON.parse(this.responseText);
-          handleCapture(endpoint, json);
+          handleCapture(endpoint, json, reqBody);
         } else if (matchCdnMasterUrl(this._nraUrl)) {
           const json = JSON.parse(this.responseText);
           if (isNikkeMasterJson(json)) {
@@ -818,7 +992,7 @@
   // =========================================================================
 
   const NRA_USERSCRIPT = {
-    VERSION: "2.0.0",
+    VERSION: "2.4.0",
     NIKKE_DATA_LIST,
     nikkeDictionary,
     findNikkeName,
@@ -827,7 +1001,13 @@
     processGuildMembers,
     validateMembersSchema,
     buildPayload,
+    buildMultiPayload,
     getRaidNum,
+    seasonToRound,
+    roundToSeason,
+    computeRoundSyncroLevels,
+    fetchRoundRaid,
+    backfillRounds,
     kstISO,
     captures,
     onCapture: handleCapture,
@@ -841,5 +1021,5 @@
   // 초기화
   ensureFloatingPanel();
   checkLogin();
-  console.log("[NRA] v2.3.2 loaded");
+  console.log("[NRA] v2.4.0 loaded");
 })();

@@ -24,7 +24,7 @@
   // SPA(https://ssissun.github.io/nikke-raid-autosync-spa/)의 [신규 회차 데이터 가져오기]
   // 버튼이 ?nra=1 을 붙여 새 탭 open 하므로, 그 경로로만 활성화된다.
   // =========================================================================
-  let NRA_FROM_ROUND = null; // SPA 가 전달한 tail 백필 시작 회차 (?from=39). 없으면 현재 회차만.
+  let NRA_FROM_ROUND = null; // SPA 가 전달한 tail 백필 시작 회차 (?from=39). 없으면(빈 시트) 가용 회차 전체 백필.
   let NRA_NEED_ROUNDS = []; // SPA 가 전달한 interior gap 회차 (?need=35,37). gap-aware 백필.
   try {
     const sp = new URLSearchParams(location.search);

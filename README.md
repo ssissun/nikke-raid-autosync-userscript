@@ -11,6 +11,7 @@ mango.hke 님의 [30초 입력법 v1.12](https://greasyfork.org/en/scripts/56538
 - `blablalink.com`의 4개 API 응답을 인터셉트합니다: `GetUnionRaidData`(레이드 결과), `GetGuildMembers`(멤버 싱크로), `GetMyGuildInfo`, `GetSavedRoleInfo`.
 - 두 핵심 데이터가 모두 캡처되면 `window.opener.postMessage`로 동반 도구(`https://ssissun.github.io`)에 전송합니다.
 - 도구가 연결되지 않은 경우 v1.12 호환 CSV 다운로드로 fallback합니다.
+- 시트에 빠진 과거 회차는 `season_id`를 바꿔 직접 fetch하여 한 번에 백필합니다. 각 회차의 출전 니케 최고 레벨(회차 당시 싱크로)과 전체 참가자 레벨(탈퇴자 기록용)을 함께 추출합니다.
 - 우상단 floating panel에 캡처 진행 상황(0/4 ~ 4/4)과 진단 메시지(로그인 필요 / 데이터 없음 / 오류)를 표시합니다.
 
 > 본인 NIKKE 계정으로 본인이 볼 수 있는 데이터만 추출합니다. 타 유니온·타 사용자 데이터에 접근하지 않습니다.
@@ -24,9 +25,9 @@ mango.hke 님의 [30초 입력법 v1.12](https://greasyfork.org/en/scripts/56538
 
 ### 방법 A — Greasyfork 1-click (권장)
 
-Greasyfork 등록 후 본 섹션의 링크가 갱신됩니다. 스크립트 페이지의 **Install this script** 버튼을 누르면 Tampermonkey 설치 다이얼로그가 표시됩니다.
+[Greasyfork 스크립트 페이지](https://greasyfork.org/scripts/579278)의 **Install this script** 버튼을 누르면 Tampermonkey 설치 다이얼로그가 표시됩니다.
 
-> Greasyfork URL: _등록 후 갱신_ (E-NRA-001 F-NRA-001-01 T-02)
+> Greasyfork URL: <https://greasyfork.org/scripts/579278>
 
 ### 방법 B — raw URL 수동 설치
 
@@ -36,7 +37,7 @@ Tampermonkey 대시보드 → **Utilities** → **Import from URL** 에 아래 r
 https://raw.githubusercontent.com/ssissun/nikke-raid-autosync-userscript/main/nikke-raid-autosync.user.js
 ```
 
-## 4. 변경 사항 (v1.12 → v2.0.0)
+## 4. 변경 사항 (v1.12 → v2.x)
 
 | 영역 | v1.12 (mango.hke) | v2.0.0 (본 도구) |
 |------|-------------------|------------------|
@@ -48,9 +49,15 @@ https://raw.githubusercontent.com/ssissun/nikke-raid-autosync-userscript/main/ni
 
 v1.12의 핵심 모듈(`NIKKE_DATA_LIST` 159 캐릭터 매핑, `processRaidData`, CSV 직렬화)은 회귀 위험 0을 위해 그대로 보존했습니다.
 
+### v2.1 ~ v2.4 추가
+
+- **다회차 백필** — `season_id`를 직접 바꿔 과거 회차를 fetch. SPA의 `?from`/`?need` 핸드셰이크로 시트에 빠진 회차만 선별 수집하며, 빈 시트는 가용 회차 전체를 백필합니다.
+- **회차 당시 싱크로 레벨** — 각 회차 `participate_data`의 squad 최고 니케 레벨을 회차별로 산출합니다.
+- **탈퇴자 레벨 기록 지원** (v2.4.3) — 전체 참가자의 회차별 레벨(`levelsByNickname`)을 함께 전송하여, SPA가 `탈퇴자 레벨 기록` 탭에 떠난 멤버의 레벨을 보존할 수 있게 합니다.
+
 ---
 
-`@updateURL` / `@downloadURL`은 Greasyfork 등록(F-NRA-001-01 T-02) 후 발급 URL로 갱신됩니다.
+`@updateURL` / `@downloadURL`은 Greasyfork([579278](https://greasyfork.org/scripts/579278)) 발급 URL을 사용합니다.
 
 ## 라이선스 / 출처
 

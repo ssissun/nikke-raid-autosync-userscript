@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        니케 유레 자동 동기화 (싱크로 레벨 + 레이드 결과)
 // @namespace   nikke-raid-autosync
-// @version     2.4.4
+// @version     2.4.5
 // @description Blablalink ShiftyPad에서 유니온 멤버 싱크로 레벨 + 레이드 결과를 추출하여 nikke-raid-autosync 도구(SPA)로 전송. mango.hke 30초 입력법 v1.12 fork.
 // @author      ssissun (mango.hke v1.12 fork)
 // @match       *://*.blablalink.com/*
@@ -17,6 +17,8 @@
 
 (function () {
   'use strict';
+
+  const NRA_VERSION = "2.4.5"; // 도구(SPA)로 전송하는 payload 에 실어 버전 감지에 사용
 
   // =========================================================================
   // SPA trigger gate — `?nra=1` query param 없으면 즉시 종료
@@ -626,7 +628,7 @@
 
   // TD-05 discriminated union: nikke-raid-data / need-login / no-data / error
   function buildPayload(type, extras = {}) {
-    const base = { type, capturedAt: kstISO() };
+    const base = { type, capturedAt: kstISO(), scriptVersion: NRA_VERSION };
     if (type === "nikke-raid-data") {
       const raidNum = getRaidNum();
       return Object.assign(base, {
@@ -651,6 +653,7 @@
     return {
       type: "nikke-raid-multi",
       capturedAt: kstISO(),
+      scriptVersion: NRA_VERSION,
       availableRaidNums: rounds.map(r => r.raidNum),
       rounds: rounds,
       members: members,
@@ -1023,7 +1026,7 @@
   // =========================================================================
 
   const NRA_USERSCRIPT = {
-    VERSION: "2.4.4",
+    VERSION: NRA_VERSION,
     NIKKE_DATA_LIST,
     nikkeDictionary,
     findNikkeName,
@@ -1052,5 +1055,5 @@
   // 초기화
   ensureFloatingPanel();
   checkLogin();
-  console.log("[NRA] v2.4.4 loaded");
+  console.log("[NRA] v" + NRA_VERSION + " loaded");
 })();

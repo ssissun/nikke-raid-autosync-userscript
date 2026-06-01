@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        니케 유레 자동 동기화 (싱크로 레벨 + 레이드 결과)
 // @namespace   nikke-raid-autosync
-// @version     2.4.1
+// @version     2.4.2
 // @description Blablalink ShiftyPad에서 유니온 멤버 싱크로 레벨 + 레이드 결과를 추출하여 nikke-raid-autosync 도구(SPA)로 전송. mango.hke 30초 입력법 v1.12 fork.
 // @author      ssissun (mango.hke v1.12 fork)
 // @match       *://*.blablalink.com/*
@@ -420,7 +420,7 @@
 
   // =========================================================================
   // [v2.4.0] season_id ↔ 회차 변환 + 다회차 백필 + 레이드 당시 싱크로 레벨
-  // season_id 형식: 1000040 = 40차 (base 1000000). Phase 0 실측 확인.
+  // season_id 형식: 1000040 = 40차 (base 1000000).
   // =========================================================================
   const SEASON_BASE = 1000000;
   const MAX_BACKFILL = 30; // 안전 cap — 무한 fetch 방지
@@ -467,7 +467,7 @@
     return result;
   }
 
-  // season_id 만 바꿔 과거 회차 데이터 직접 fetch (Phase 0 검증 — 헤더 하드코딩 + cookie).
+  // season_id 만 바꿔 과거 회차 데이터 직접 fetch (헤더 하드코딩 + cookie).
   // 반환: raidJson (pdCount>0) | null (빈 회차 / 실패).
   async function fetchRoundRaid(round, reqBase) {
     const url = "https://api.blablalink.com/api/game/proxy/Game/GetUnionRaidDataOfGuildSeason";
@@ -694,14 +694,16 @@
     updatePanel({ statusText: "회차 데이터 수집 중..." });
     backfillRounds(currentRound, NRA_FROM_ROUND, NRA_NEED_ROUNDS, captures.raidReq, members)
       .then(rounds => {
-        if (!rounds || rounds.length === 0) {
-          // 백필 0건 — 현재 회차 단일로라도 송신 (passive capture)
-          const single = {
+        rounds = rounds || [];
+        // 현재 회차는 항상 포함 — SPA 의 최신 회차 식별·미참여 판정 기준이 된다.
+        // backfill 이 from>current 로 tail 을 비우거나 need 에 현재 회차가 빠져도 passive capture 로 보장.
+        if (!rounds.some(r => r.raidNum === String(currentRound))) {
+          rounds.push({
             raidNum: String(currentRound),
             raid: processRaidDataWithFallback(captures.raid, String(currentRound)).slice(1),
             memberSyncroLevels: computeRoundSyncroLevels(captures.raid, members)
-          };
-          rounds = [single];
+          });
+          rounds.sort((a, b) => Number(a.raidNum) - Number(b.raidNum));
         }
         console.log("[NRA] 다회차 수집 완료:", rounds.map(r => r.raidNum).join(", "));
         updatePanel({ statusText: "회차 " + rounds.length + "개 전송 (" + rounds.map(r => r.raidNum + "차").join("·") + ")" });
@@ -1015,7 +1017,7 @@
   // =========================================================================
 
   const NRA_USERSCRIPT = {
-    VERSION: "2.4.1",
+    VERSION: "2.4.2",
     NIKKE_DATA_LIST,
     nikkeDictionary,
     findNikkeName,
@@ -1044,5 +1046,5 @@
   // 초기화
   ensureFloatingPanel();
   checkLogin();
-  console.log("[NRA] v2.4.1 loaded");
+  console.log("[NRA] v2.4.2 loaded");
 })();

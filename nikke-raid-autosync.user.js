@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        니케 유레 자동 동기화 (싱크로 레벨 + 레이드 결과)
 // @namespace   nikke-raid-autosync
-// @version     2.4.3
+// @version     2.4.4
 // @description Blablalink ShiftyPad에서 유니온 멤버 싱크로 레벨 + 레이드 결과를 추출하여 nikke-raid-autosync 도구(SPA)로 전송. mango.hke 30초 입력법 v1.12 fork.
 // @author      ssissun (mango.hke v1.12 fork)
 // @match       *://*.blablalink.com/*
@@ -519,7 +519,10 @@
     let fetchCount = 0;
 
     // 1) tail (연속 최신분)
-    const lowerBound = Math.max(fromRound || currentRound, currentRound - MAX_BACKFILL + 1, 1);
+    //   from 제공(시트에 회차 존재): from~current 만 수집.
+    //   from 없음(빈 시트): 가용 한도(MAX_BACKFILL)까지 전체 백필 — 첫 빈 응답에서 중단.
+    const tailFloor = Math.max(currentRound - MAX_BACKFILL + 1, 1);
+    const lowerBound = fromRound && fromRound > 0 ? Math.max(fromRound, tailFloor) : tailFloor;
     for (let r = currentRound; r >= lowerBound; r--) {
       if (fetchCount >= MAX_BACKFILL) break;
       const round = await buildRound(r, reqBase, members, currentRound);
@@ -1020,7 +1023,7 @@
   // =========================================================================
 
   const NRA_USERSCRIPT = {
-    VERSION: "2.4.3",
+    VERSION: "2.4.4",
     NIKKE_DATA_LIST,
     nikkeDictionary,
     findNikkeName,
@@ -1049,5 +1052,5 @@
   // 초기화
   ensureFloatingPanel();
   checkLogin();
-  console.log("[NRA] v2.4.3 loaded");
+  console.log("[NRA] v2.4.4 loaded");
 })();

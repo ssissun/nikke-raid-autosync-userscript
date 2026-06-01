@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        니케 유레 자동 동기화 (싱크로 레벨 + 레이드 결과)
 // @namespace   nikke-raid-autosync
-// @version     2.4.2
+// @version     2.4.3
 // @description Blablalink ShiftyPad에서 유니온 멤버 싱크로 레벨 + 레이드 결과를 추출하여 nikke-raid-autosync 도구(SPA)로 전송. mango.hke 30초 입력법 v1.12 fork.
 // @author      ssissun (mango.hke v1.12 fork)
 // @match       *://*.blablalink.com/*
@@ -455,7 +455,7 @@
       }
       byNick[nick] = mx;
     }
-    // nickname → member_id (현재 멤버 기준). 미참여/탈퇴 멤버는 자연 제외.
+    // nickname → member_id (현재 멤버 기준). 미참여/탈퇴 멤버는 byId 에서 자연 제외.
     const nickToId = {};
     for (const m of (members || [])) {
       if (m && m.nickname) nickToId[m.nickname] = m.member_id;
@@ -464,7 +464,8 @@
       const id = nickToId[nick];
       if (id && byNick[nick] > 0) result[id] = byNick[nick];
     }
-    return result;
+    // byId: 현재 멤버(member_id) 기준. byNick: 전체 참가자(닉네임) 기준 — 탈퇴자 기록용.
+    return { byId: result, byNick };
   }
 
   // season_id 만 바꿔 과거 회차 데이터 직접 fetch (헤더 하드코딩 + cookie).
@@ -505,8 +506,8 @@
       : await fetchRoundRaid(r, reqBase);
     if (!raidJson) return null; // 블라 미제공/빈 회차
     const rows = processRaidDataWithFallback(raidJson, String(r)).slice(1); // header 제거
-    const memberSyncroLevels = computeRoundSyncroLevels(raidJson, members);
-    return { raidNum: String(r), raid: rows, memberSyncroLevels };
+    const { byId, byNick } = computeRoundSyncroLevels(raidJson, members);
+    return { raidNum: String(r), raid: rows, memberSyncroLevels: byId, levelsByNickname: byNick };
   }
 
   // gap-aware 다회차 백필.
@@ -698,10 +699,12 @@
         // 현재 회차는 항상 포함 — SPA 의 최신 회차 식별·미참여 판정 기준이 된다.
         // backfill 이 from>current 로 tail 을 비우거나 need 에 현재 회차가 빠져도 passive capture 로 보장.
         if (!rounds.some(r => r.raidNum === String(currentRound))) {
+          const cur = computeRoundSyncroLevels(captures.raid, members);
           rounds.push({
             raidNum: String(currentRound),
             raid: processRaidDataWithFallback(captures.raid, String(currentRound)).slice(1),
-            memberSyncroLevels: computeRoundSyncroLevels(captures.raid, members)
+            memberSyncroLevels: cur.byId,
+            levelsByNickname: cur.byNick
           });
           rounds.sort((a, b) => Number(a.raidNum) - Number(b.raidNum));
         }
@@ -1017,7 +1020,7 @@
   // =========================================================================
 
   const NRA_USERSCRIPT = {
-    VERSION: "2.4.2",
+    VERSION: "2.4.3",
     NIKKE_DATA_LIST,
     nikkeDictionary,
     findNikkeName,
@@ -1046,5 +1049,5 @@
   // 초기화
   ensureFloatingPanel();
   checkLogin();
-  console.log("[NRA] v2.4.2 loaded");
+  console.log("[NRA] v2.4.3 loaded");
 })();

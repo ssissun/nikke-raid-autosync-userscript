@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        니케 유레 자동 동기화 (싱크로 레벨 + 레이드 결과)
 // @namespace   nikke-raid-autosync
-// @version     2.4.0
+// @version     2.4.1
 // @description Blablalink ShiftyPad에서 유니온 멤버 싱크로 레벨 + 레이드 결과를 추출하여 nikke-raid-autosync 도구(SPA)로 전송. mango.hke 30초 입력법 v1.12 fork.
 // @author      ssissun (mango.hke v1.12 fork)
 // @match       *://*.blablalink.com/*
@@ -24,7 +24,8 @@
   // SPA(https://ssissun.github.io/nikke-raid-autosync-spa/)의 [신규 회차 데이터 가져오기]
   // 버튼이 ?nra=1 을 붙여 새 탭 open 하므로, 그 경로로만 활성화된다.
   // =========================================================================
-  let NRA_FROM_ROUND = null; // SPA 가 전달한 백필 시작 회차 (?from=38). 없으면 현재 회차만.
+  let NRA_FROM_ROUND = null; // SPA 가 전달한 tail 백필 시작 회차 (?from=39). 없으면 현재 회차만.
+  let NRA_NEED_ROUNDS = []; // SPA 가 전달한 interior gap 회차 (?need=35,37). gap-aware 백필.
   try {
     const sp = new URLSearchParams(location.search);
     if (!sp.has("nra")) {
@@ -32,6 +33,13 @@
     }
     const f = parseInt(sp.get("from"), 10);
     if (!Number.isNaN(f) && f > 0) NRA_FROM_ROUND = f;
+    const need = sp.get("need");
+    if (need) {
+      NRA_NEED_ROUNDS = need
+        .split(",")
+        .map((s) => parseInt(s, 10))
+        .filter((n) => !Number.isNaN(n) && n > 0);
+    }
   } catch (e) {
     return; // location.search 접근 실패 시 안전 차단
   }
@@ -490,33 +498,48 @@
     }
   }
 
-  // 다회차 백필 — current 부터 내림차순으로 fetch, 첫 빈 응답 또는 from 미만에서 중단.
-  // 반환: rounds[] (오름차순) — { raidNum, raid: ProcessedRaidRow[], memberSyncroLevels }.
-  async function backfillRounds(currentRound, fromRound, reqBase, members) {
-    const lowerBound = Math.max(
-      fromRound || currentRound,
-      currentRound - MAX_BACKFILL + 1,
-      1
-    );
-    const collected = [];
+  // 단일 회차 fetch + 가공. 이미 가진 currentRound 의 raidJson 재사용 가능.
+  async function buildRound(r, reqBase, members, currentRound) {
+    const raidJson = (r === currentRound && captures.raid)
+      ? captures.raid
+      : await fetchRoundRaid(r, reqBase);
+    if (!raidJson) return null; // 블라 미제공/빈 회차
+    const rows = processRaidDataWithFallback(raidJson, String(r)).slice(1); // header 제거
+    const memberSyncroLevels = computeRoundSyncroLevels(raidJson, members);
+    return { raidNum: String(r), raid: rows, memberSyncroLevels };
+  }
+
+  // gap-aware 다회차 백필.
+  //  - tail: current 부터 내림차순, 첫 빈 응답 또는 fromRound 미만에서 중단 (연속 최신분).
+  //  - need: SPA 가 지정한 interior gap 회차 — 각각 직접 fetch, 빈 회차는 skip (블라 한도).
+  // 반환: rounds[] (오름차순, raidNum 중복 제거). 총 fetch 는 MAX_BACKFILL 로 제한.
+  async function backfillRounds(currentRound, fromRound, needRounds, reqBase, members) {
+    const byNum = new Map(); // raidNum(string) → round
+    let fetchCount = 0;
+
+    // 1) tail (연속 최신분)
+    const lowerBound = Math.max(fromRound || currentRound, currentRound - MAX_BACKFILL + 1, 1);
     for (let r = currentRound; r >= lowerBound; r--) {
-      // 현재 회차는 passive capture 재사용 (1 fetch 절감)
-      const raidJson = (r === currentRound && captures.raid) ? captures.raid : await fetchRoundRaid(r, reqBase);
-      if (!raidJson) {
-        if (r === currentRound) {
-          // 현재 회차 데이터 없음 — 비정상, 중단
-          break;
-        }
-        // 과거 회차 빈 응답 → 더 과거도 없다고 보고 중단
-        break;
-      }
-      const rows = processRaidDataWithFallback(raidJson, String(r)).slice(1); // header 제거
-      const memberSyncroLevels = computeRoundSyncroLevels(raidJson, members);
-      collected.push({ raidNum: String(r), raid: rows, memberSyncroLevels });
-      updatePanel({ statusText: "회차 데이터 수집 중... (" + collected.length + "개)" });
+      if (fetchCount >= MAX_BACKFILL) break;
+      const round = await buildRound(r, reqBase, members, currentRound);
+      if (r !== currentRound) fetchCount++;
+      if (!round) break; // 첫 빈 응답에서 tail 중단
+      byNum.set(round.raidNum, round);
+      updatePanel({ statusText: "회차 데이터 수집 중... (" + byNum.size + "개)" });
     }
-    collected.reverse(); // 오름차순 (38→39→40)
-    return collected;
+
+    // 2) need (interior gap) — 각각 직접 fetch, 빈 회차 skip
+    for (const r of needRounds) {
+      if (fetchCount >= MAX_BACKFILL) break;
+      if (byNum.has(String(r))) continue; // tail 에서 이미 수집
+      const round = await buildRound(r, reqBase, members, currentRound);
+      fetchCount++;
+      if (!round) continue; // 블라 미제공 회차 → skip
+      byNum.set(round.raidNum, round);
+      updatePanel({ statusText: "회차 데이터 수집 중... (" + byNum.size + "개)" });
+    }
+
+    return [...byNum.values()].sort((a, b) => Number(a.raidNum) - Number(b.raidNum));
   }
 
   // GetGuildMembers items[] → Member[] (code != 0 또는 items 부재 시 null)
@@ -667,9 +690,9 @@
       return;
     }
 
-    // 다회차 백필 (현재~from 내림차순, 첫 빈 응답에서 중단)
+    // 다회차 백필 (tail: 현재~from + need: interior gap, 빈 회차 skip)
     updatePanel({ statusText: "회차 데이터 수집 중..." });
-    backfillRounds(currentRound, NRA_FROM_ROUND, captures.raidReq, members)
+    backfillRounds(currentRound, NRA_FROM_ROUND, NRA_NEED_ROUNDS, captures.raidReq, members)
       .then(rounds => {
         if (!rounds || rounds.length === 0) {
           // 백필 0건 — 현재 회차 단일로라도 송신 (passive capture)
@@ -992,7 +1015,7 @@
   // =========================================================================
 
   const NRA_USERSCRIPT = {
-    VERSION: "2.4.0",
+    VERSION: "2.4.1",
     NIKKE_DATA_LIST,
     nikkeDictionary,
     findNikkeName,
@@ -1021,5 +1044,5 @@
   // 초기화
   ensureFloatingPanel();
   checkLogin();
-  console.log("[NRA] v2.4.0 loaded");
+  console.log("[NRA] v2.4.1 loaded");
 })();

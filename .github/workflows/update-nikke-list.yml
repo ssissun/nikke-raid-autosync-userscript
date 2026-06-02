@@ -1,0 +1,50 @@
+name: NIKKE 목록 자동 갱신
+
+# blablalink(비로그인)에서 NIKKE 캐릭터 마스터를 발견·fetch 하여,
+# 하드코딩 NIKKE_DATA_LIST 에 없는 신규 SSR 을 자동 append + data-build 버전(X.Y.Z.N) bump.
+# push 후 Greasyfork "sync from URL"(raw main)이 재import → Tampermonkey 자동 업데이트.
+# 공개 repo 라 GitHub-hosted runner 사용료 0.
+
+on:
+  schedule:
+    - cron: "0 0 * * 5" # 매주 금요일 00:00 UTC (= 금 09:00 KST)
+  workflow_dispatch: {} # 수동 트리거
+
+permissions:
+  contents: write
+
+# 동시 실행 방지 (스케줄 + 수동 겹침 시)
+concurrency:
+  group: update-nikke-list
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 의존성 설치
+        run: npm install
+
+      - name: Playwright Chromium 설치
+        run: npx playwright install --with-deps chromium
+
+      - name: NIKKE 마스터 발견 + 목록 갱신
+        run: node scripts/update-nikke-list.mjs
+
+      - name: 변경 시 commit/push (github-actions[bot])
+        run: |
+          if [ -n "$(git status --porcelain nikke-raid-autosync.user.js)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add nikke-raid-autosync.user.js
+            git commit -m "chore(data): NIKKE 마스터 신규 SSR 자동 반영 [skip ci]"
+            git push
+          else
+            echo "변경 없음 — NIKKE_DATA_LIST 최신"
+          fi

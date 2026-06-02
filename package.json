@@ -1,0 +1,12 @@
+{
+  "name": "nikke-raid-autosync-userscript",
+  "version": "0.0.0",
+  "private": true,
+  "description": "NIKKE 유레 자동 동기화 userscript — CI 도구(NIKKE 목록 자동 갱신)",
+  "scripts": {
+    "update-nikke": "node scripts/update-nikke-list.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        니케 유레 자동 동기화 (싱크로 레벨 + 레이드 결과)
 // @namespace   nikke-raid-autosync
-// @version     2.4.5
+// @version     2.4.6
 // @description Blablalink ShiftyPad에서 유니온 멤버 싱크로 레벨 + 레이드 결과를 추출하여 nikke-raid-autosync 도구(SPA)로 전송. mango.hke 30초 입력법 v1.12 fork.
 // @author      ssissun (mango.hke v1.12 fork)
 // @match       *://*.blablalink.com/*
@@ -18,7 +18,7 @@
 (function () {
   'use strict';
 
-  const NRA_VERSION = "2.4.5"; // 도구(SPA)로 전송하는 payload 에 실어 버전 감지에 사용
+  const NRA_VERSION = "2.4.6"; // 도구(SPA)로 전송하는 payload 에 실어 버전 감지에 사용
 
   // =========================================================================
   // SPA trigger gate — `?nra=1` query param 없으면 즉시 종료
@@ -47,9 +47,10 @@
   }
 
   // =========================================================================
-  // [v1.12 byte-identical core] mango.hke Greasyfork 565386 — 회귀 위험 0
-  // NIKKE_DATA_LIST / nikkeDictionary / findNikkeName / findNikkeBreak /
-  // processRaidData 는 원본 그대로 보존한다 (변경 시 @version bump + changelog).
+  // [v1.12 core] mango.hke Greasyfork 565386 — 회귀 위험 0
+  // nikkeDictionary / findNikkeName / findNikkeBreak / processRaidData 는 원본 그대로 보존.
+  // NIKKE_DATA_LIST: v1.12 원본 별명 항목은 보존, 신규 SSR 만 CI(.github/workflows/update-nikke-list.yml)가
+  // CDN 마스터에서 정식명으로 자동 append 한다 (별명 항목은 수정하지 않음).
   // =========================================================================
 
   // 데이터 입력
@@ -329,20 +330,7 @@
     return newNikkes;
   }
 
-  // 신규 니케 누적 카운트 (페이지 세션 동안). 중복 표시 방지.
-  const seenNewNikkeKeys = new Set();
-  function reportNewNikkes(newNikkes) {
-    let addedThisCall = 0;
-    for (const n of newNikkes) {
-      if (seenNewNikkeKeys.has(n.key)) continue;
-      seenNewNikkeKeys.add(n.key);
-      console.log(`[NRA] 신규 니케 (NIKKE_DATA_LIST 미등록): id=${n.id}, name="${n.name}"`);
-      addedThisCall++;
-    }
-    if (addedThisCall > 0 && seenNewNikkeKeys.size > 0) {
-      updatePanel({ newNikkeCount: seenNewNikkeKeys.size });
-    }
-  }
+  // (신규 니케 사용자 알림 제거 — CI 가 NIKKE_DATA_LIST 를 자동 갱신하므로 런타임 보고 불필요)
 
   // processRaidData byte-identical core 결과 후처리.
   // unit name 컬럼(4·6·8·10·12)의 `Unknown(XXXXXX)` 패턴을 cdnFallbackDict 로 대체.
@@ -368,17 +356,7 @@
     return result;
   }
 
-  // 페이지 로드 직후 localStorage 캐시 의 fallback dict 와 NIKKE_DATA_LIST 비교 보고.
-  // 캐시에 있던 신규 니케를 즉시 콘솔/플로터에 표시 (panel ready 후 표시됨).
-  function reportFromCache() {
-    const fromCache = [];
-    for (const [keyStr, name] of Object.entries(cdnFallbackDict)) {
-      const key = parseInt(keyStr, 10);
-      if (Number.isNaN(key) || nikkeDictionary[key]) continue;
-      fromCache.push({ id: key * 100 + 1, key, name });
-    }
-    if (fromCache.length > 0) reportNewNikkes(fromCache);
-  }
+  // (reportFromCache 제거 — 신규 니케 캐시 보고 알림 폐지로 불필요)
 
   // =========================================================================
   // [F-NRA-001-03] 상수 + helper
@@ -779,7 +757,6 @@
       '</div>' +
       '<div id="nra-status" style="margin-bottom:6px">데이터 캡처 중...</div>' +
       '<div id="nra-progress" style="font-size:11px;color:' + PALETTE.meta + '">캡처 0/2</div>' +
-      '<div id="nra-new-nikke" style="font-size:11px;color:' + PALETTE.meta + ';margin-top:2px;display:none"></div>' +
       '<div id="nra-action" style="margin-top:8px;display:none"></div>';
     document.body.appendChild(panel);
 
@@ -788,8 +765,6 @@
     document.addEventListener("keydown", onEscClose);
 
     panelReady = true;
-    // Panel 첫 생성 직후 localStorage 캐시 의 신규 니케 보고 (macrotask 분리로 재귀 회피)
-    setTimeout(reportFromCache, 0);
     return panel;
   }
 
@@ -811,17 +786,6 @@
     if (state.captured != null) {
       const el = panel.querySelector("#nra-progress");
       if (el) el.textContent = "캡처 " + state.captured + "/2";
-    }
-    if (state.newNikkeCount != null) {
-      const el = panel.querySelector("#nra-new-nikke");
-      if (el) {
-        if (state.newNikkeCount > 0) {
-          el.textContent = "신규 니케 " + state.newNikkeCount + "명 (콘솔 확인)";
-          el.style.display = "block";
-        } else {
-          el.style.display = "none";
-        }
-      }
     }
     if (state.diagnostic != null) {
       const style = DIAGNOSTIC_STYLE[state.diagnostic];
@@ -943,8 +907,7 @@
         // sg-tools-cdn JSON — 캐릭터 마스터 패턴이면 fallback dict 갱신
         const json = await response.clone().json();
         if (isNikkeMasterJson(json)) {
-          const newNikkes = ingestNikkeMaster(json);
-          reportNewNikkes(newNikkes);
+          ingestNikkeMaster(json); // cdnFallbackDict 갱신 (런타임 fallback). 사용자 알림 없음.
         }
       }
     } catch (e) { /* ignore parsing errors */ }
@@ -978,8 +941,7 @@
         } else if (matchCdnMasterUrl(this._nraUrl)) {
           const json = JSON.parse(this.responseText);
           if (isNikkeMasterJson(json)) {
-            const newNikkes = ingestNikkeMaster(json);
-            reportNewNikkes(newNikkes);
+            ingestNikkeMaster(json); // cdnFallbackDict 갱신 (런타임 fallback). 사용자 알림 없음.
           }
         }
       } catch (e) { /* ignore parsing errors */ }

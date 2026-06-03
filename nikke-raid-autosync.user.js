@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        니케 유레 자동 동기화 (싱크로 레벨 + 레이드 결과)
 // @namespace   nikke-raid-autosync
-// @version     2.4.6.1
+// @version     2.5.0
 // @description Blablalink ShiftyPad에서 유니온 멤버 싱크로 레벨 + 레이드 결과를 추출하여 nikke-raid-autosync 도구(SPA)로 전송. mango.hke 30초 입력법 v1.12 fork.
 // @author      ssissun (mango.hke v1.12 fork)
 // @match       *://*.blablalink.com/*
@@ -18,7 +18,7 @@
 (function () {
   'use strict';
 
-  const NRA_VERSION = "2.4.6.1"; // 도구(SPA)로 전송하는 payload 에 실어 버전 감지에 사용
+  const NRA_VERSION = "2.5.0"; // 도구(SPA)로 전송하는 payload 에 실어 버전 감지에 사용
 
   // =========================================================================
   // SPA trigger gate — `?nra=1` query param 없으면 즉시 종료
@@ -511,6 +511,7 @@
       if (!round) break; // 첫 빈 응답에서 tail 중단
       byNum.set(round.raidNum, round);
       updatePanel({ statusText: "회차 데이터 수집 중... (" + byNum.size + "개)" });
+      sendProgress({ statusText: "회차 데이터 수집 중... (" + byNum.size + "개)" });
     }
 
     // 2) need (interior gap) — 각각 직접 fetch, 빈 회차 skip
@@ -522,6 +523,7 @@
       if (!round) continue; // 블라 미제공 회차 → skip
       byNum.set(round.raidNum, round);
       updatePanel({ statusText: "회차 데이터 수집 중... (" + byNum.size + "개)" });
+      sendProgress({ statusText: "회차 데이터 수집 중... (" + byNum.size + "개)" });
     }
 
     return [...byNum.values()].sort((a, b) => Number(a.raidNum) - Number(b.raidNum));
@@ -658,6 +660,22 @@
     fallbackCSV(csvFallbackPayload || payload);
   }
 
+  // 수집 진행 송신 (opener postMessage) — 패널 갱신과 동반 호출하여 캡처/회차 진행을 SPA 화면에 미러링.
+  // opener 미가용/송신 실패는 무해(무시). 캡처/전송 코어는 무변경.
+  function sendProgress(state) {
+    try {
+      if (PAGE_WINDOW.opener && !PAGE_WINDOW.opener.closed) {
+        PAGE_WINDOW.opener.postMessage({
+          type: "nra-progress",
+          captured: state.captured != null ? state.captured : capturedCount(),
+          total: 2,
+          statusText: state.statusText != null ? state.statusText : "",
+          scriptVersion: NRA_VERSION,
+        }, TOOL_ORIGIN);
+      }
+    } catch (e) { /* 진행 송신 실패는 무해 */ }
+  }
+
   // raid + members 모두 캡처되면 다회차 백필 후 도구로 송신.
   let nraSent = false;
   function checkAndSend() {
@@ -678,6 +696,7 @@
 
     // 다회차 백필 (tail: 현재~from + need: interior gap, 빈 회차 skip)
     updatePanel({ statusText: "회차 데이터 수집 중..." });
+    sendProgress({ statusText: "회차 데이터 수집 중..." });
     backfillRounds(currentRound, NRA_FROM_ROUND, NRA_NEED_ROUNDS, captures.raidReq, members)
       .then(rounds => {
         rounds = rounds || [];
@@ -694,7 +713,9 @@
           rounds.sort((a, b) => Number(a.raidNum) - Number(b.raidNum));
         }
         console.log("[NRA] 다회차 수집 완료:", rounds.map(r => r.raidNum).join(", "));
-        updatePanel({ statusText: "회차 " + rounds.length + "개 전송 (" + rounds.map(r => r.raidNum + "차").join("·") + ")" });
+        const sentStatus = "회차 " + rounds.length + "개 전송 (" + rounds.map(r => r.raidNum + "차").join("·") + ")";
+        updatePanel({ statusText: sentStatus });
+        sendProgress({ statusText: sentStatus });
         dispatchPayload(buildMultiPayload(rounds, members), buildPayload("nikke-raid-data"));
       })
       .catch(e => {
@@ -887,6 +908,7 @@
       console.log("[NRA] captured:", endpoint);
       inspectResponse(json, endpoint);
       updatePanel({ captured: capturedCount() });
+      sendProgress({ captured: capturedCount() });
       checkAndSend();
     } catch (e) { /* swallow — 페이지 흐름 비파괴 */ }
   }

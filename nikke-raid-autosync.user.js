@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        니케 유레 자동 동기화 (싱크로 레벨 + 레이드 결과)
 // @namespace   nikke-raid-autosync
-// @version     2.5.0.2
+// @version     2.5.1
 // @description Blablalink ShiftyPad에서 유니온 멤버 싱크로 레벨 + 레이드 결과를 추출하여 nikke-raid-autosync 도구(SPA)로 전송. mango.hke 30초 입력법 v1.12 fork.
 // @author      ssissun (mango.hke v1.12 fork)
 // @match       *://*.blablalink.com/*
@@ -18,7 +18,7 @@
 (function () {
   'use strict';
 
-  const NRA_VERSION = "2.5.0.2"; // 도구(SPA)로 전송하는 payload 에 실어 버전 감지에 사용
+  const NRA_VERSION = "2.5.1"; // 도구(SPA)로 전송하는 payload 에 실어 버전 감지에 사용
 
   // =========================================================================
   // SPA trigger gate — `?nra=1` query param 없으면 즉시 종료
@@ -374,8 +374,9 @@
   // `@grant unsafeWindow` + `@inject-into page` 조합으로 명시적으로 main world 접근.
   const PAGE_WINDOW = (typeof unsafeWindow !== "undefined") ? unsafeWindow : window;
 
-  // 4 endpoint URL 키워드 (F-02 인터셉트 대상)
-  const ENDPOINT_KEYWORDS = ["GetUnionRaidData", "GetGuildMembers", "GetMyGuildInfo", "GetSavedRoleInfo"];
+  // endpoint URL 키워드 (F-02 인터셉트 대상)
+  // GetUnionRaidLevelInfo: 현재 회차(season_id) authoritative source — manager_info.id (2026-07 추가).
+  const ENDPOINT_KEYWORDS = ["GetUnionRaidData", "GetUnionRaidLevelInfo", "GetGuildMembers", "GetMyGuildInfo", "GetSavedRoleInfo"];
 
   // KST ISO 8601 (+09:00) — harness-config-standards §2.5
   function kstISO() {
@@ -394,7 +395,7 @@
   // [F-NRA-001-02] captures + 변환 + schema validator
   // =========================================================================
 
-  const captures = { raid: null, members: null, guildId: null, areaId: null, raidReq: null };
+  const captures = { raid: null, members: null, guildId: null, areaId: null, raidReq: null, currentSeasonId: null };
 
   // 도구 송신 조건과 분모 일치 — raid + members 만 필수 (guildId/areaId 는 옵셔널 메타).
   // floater 표시: "캡처 N/2".
@@ -679,28 +680,56 @@
     } catch (e) { /* 진행 송신 실패는 무해 */ }
   }
 
-  // raid + members 모두 캡처되면 다회차 백필 후 도구로 송신.
+  // 현재 회차(season_id) 확보 우선순위:
+  //   1) GetUnionRaidLevelInfo.manager_info.id (2026-07 현재 유일하게 신뢰 가능한 source)
+  //   2) (레거시) raid 요청 body 의 season_id — 현재 페이지는 싣지 않음
+  function resolveSeasonId() {
+    return captures.currentSeasonId
+      || (captures.raidReq && captures.raidReq.season_id)
+      || null;
+  }
+
+  // raid + members 모두 캡처되면 회차 확보 후 도구로 송신.
   let nraSent = false;
+  let sendGraceTimer = null;
   function checkAndSend() {
     if (nraSent) return;
     if (!captures.raid || !captures.members) return;
+
+    // raid+members 는 준비됐으나 회차 미상 → GetUnionRaidLevelInfo 도착을 잠깐 기다린다.
+    // (union-raid 페이지에서 LevelInfo 는 보통 raid 직후 도착 — 순서 경쟁 방지.)
+    if (!resolveSeasonId()) {
+      if (sendGraceTimer === null) {
+        sendGraceTimer = setTimeout(finalizeSend, 2500);
+      }
+      return;
+    }
+    finalizeSend();
+  }
+
+  function finalizeSend() {
+    if (nraSent) return;
     nraSent = true;
+    if (sendGraceTimer !== null) { clearTimeout(sendGraceTimer); sendGraceTimer = null; }
     clearTimeout(captureTimeout);
 
     const members = processGuildMembers(captures.members);
-    const currentRound = captures.raidReq ? seasonToRound(captures.raidReq.season_id) : null;
+    const seasonId = resolveSeasonId();
+    const currentRound = seasonId ? seasonToRound(seasonId) : null;
 
-    // season_id 확보 실패 → 레거시 single fallback (회차 추측은 SPA 측 guessNextRaidNum)
-    if (currentRound === null || !captures.raidReq) {
-      console.log("[NRA] season_id 미확보 — 레거시 single payload fallback");
+    // 회차 완전 미상 → 레거시 single fallback (회차 추측은 SPA 측 guessNextRaidNum)
+    if (currentRound === null) {
+      console.log("[NRA] 회차 미확보 — 레거시 single payload fallback");
       dispatchPayload(buildPayload("nikke-raid-data"));
       return;
     }
 
-    // 다회차 백필 (tail: 현재~from + need: interior gap, 빈 회차 skip)
+    // 다회차 백필 (tail: 현재~from + need: interior gap, 빈 회차 skip).
+    // 2026-07: blablalink 가 GetUnionRaidDataOfGuildSeason(과거 회차 fetch)을 막아 실질적으로
+    //   현재 회차만 수집된다(과거 fetch 는 빈 응답 → tail 즉시 중단). 향후 복구 대비 경로는 유지.
     updatePanel({ statusText: "회차 데이터 수집 중..." });
     sendProgress({ statusText: "회차 데이터 수집 중..." });
-    backfillRounds(currentRound, NRA_FROM_ROUND, NRA_NEED_ROUNDS, captures.raidReq, members)
+    backfillRounds(currentRound, NRA_FROM_ROUND, NRA_NEED_ROUNDS, captures.raidReq || {}, members)
       .then(rounds => {
         rounds = rounds || [];
         // 현재 회차는 항상 포함 — SPA 의 최신 회차 식별·미참여 판정 기준이 된다.
@@ -888,8 +917,15 @@
   function captureRaidReqBody(rawBody) {
     try {
       const b = typeof rawBody === "string" ? JSON.parse(rawBody) : rawBody;
-      if (b && (b.season_id != null) && (b.guild_id != null)) {
-        captures.raidReq = { area_id: b.area_id, guild_id: b.guild_id, season_id: String(b.season_id) };
+      // 2026-07: 페이지가 season_id 를 더 이상 raid 요청 body 에 싣지 않는다
+      //   (현재 body = {guild_id, nikke_area_id, intl_open_id}). guild_id + area_id 만 확보하고
+      //   회차(season_id)는 GetUnionRaidLevelInfo.manager_info.id 로 별도 확보한다.
+      if (b && b.guild_id != null) {
+        captures.raidReq = {
+          area_id: b.area_id != null ? b.area_id : b.nikke_area_id,
+          guild_id: b.guild_id,
+          season_id: b.season_id != null ? String(b.season_id) : null,
+        };
       }
     } catch (e) { /* ignore */ }
   }
@@ -900,6 +936,10 @@
       if (endpoint === "GetUnionRaidData") {
         captures.raid = json;
         if (reqBody != null) captureRaidReqBody(reqBody);
+      } else if (endpoint === "GetUnionRaidLevelInfo") {
+        // 현재 회차 authoritative source — manager_info.id = season_id (예: 1000042 = 42차).
+        const sid = json && json.data && json.data.manager_info && json.data.manager_info.id;
+        if (sid != null) captures.currentSeasonId = String(sid);
       } else if (endpoint === "GetGuildMembers") {
         captures.members = json;
       } else if (endpoint === "GetMyGuildInfo") {
